@@ -1,30 +1,104 @@
 import { useState, useRef, useEffect } from 'react'
 import { useUser } from '../../contexts/UserContext'
+import { useLocation } from 'react-router-dom'
+
+const API_URL = import.meta.env.VITE_API_URL ?? ''
 
 export default function ChatWidget() {
   const { user, suggestions } = useUser()
+  const location = useLocation()
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: `Hello ${user.name}! I'm connected to your Telegram chat. How can I help?`, time: new Date() }
+    { role: 'assistant', text: `Hello ${user.name}! I'm connected to your drilling data. How can I help?`, time: new Date() }
   ])
+  const [isLoading, setIsLoading] = useState(false)
+  const [currentDomain, setCurrentDomain] = useState(null)
   const chatRef = useRef()
 
   useEffect(() => {
     chatRef.current?.scrollTo(0, chatRef.current.scrollHeight)
   }, [messages])
 
-  const sendMessage = () => {
-    if (!message.trim()) return
-    setMessages([...messages, { role: 'user', text: message, time: new Date() }])
-    setMessage('')
+  // Get current context from app state
+  const getContext = () => ({
+    active_tab: location.pathname.replace('/', '') || 'dashboard',
+    active_hash: location.hash.replace('#', ''),
+    timestamp: new Date().toISOString()
+  })
+
+  const sendMessage = async () => {
+    if (!message.trim() || isLoading) return
     
-    setTimeout(() => {
-      setMessages(m => [...m, { 
-        role: 'assistant', 
-        text: "I'll help you with that. Let me check the relevant data...", 
-        time: new Date() 
+    const userMsg = message
+    setMessage('')
+    setMessages(m => [...m, { role: 'user', text: userMsg, time: new Date() }])
+    setIsLoading(true)
+
+    try {
+      // 1. Route the message and get brain context
+      const routeRes = await fetch(`${API_URL}/api/router/brain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMsg,
+          channel: 'web',
+          channelId: user.telegramId || user.id || 'web-user',
+          context: getContext()
+        })
+      })
+
+      if (!routeRes.ok) throw new Error('Routing failed')
+      
+      const routeData = await routeRes.json()
+      setCurrentDomain(routeData.routing)
+
+      // 2. For now, show routing info + placeholder response
+      // TODO: Wire to actual LLM with systemPrompt
+      const domainEmoji = {
+        drilling: '🛢️',
+        architecture: '🏗️',
+        pipeline: '📊',
+        personal: '👤'
+      }[routeData.routing.domain] || '🤖'
+
+      // Simulate thinking based on domain
+      const responses = {
+        drilling: `${domainEmoji} I can see you're asking about drilling data. Based on my analysis of ${routeData.entities?.rig ? `Rig ${routeData.entities.rig}` : 'your wells'}...`,
+        architecture: `${domainEmoji} That's an architecture question. Let me think about system design...`,
+        pipeline: `${domainEmoji} Checking pipeline status for you...`,
+        personal: `${domainEmoji} I'll help you with that personal task...`
+      }
+
+      // Add response with routing indicator
+      setTimeout(() => {
+        setMessages(m => [...m, {
+          role: 'assistant',
+          text: responses[routeData.routing.domain] || "I'll help you with that...",
+          time: new Date(),
+          domain: routeData.routing.domain,
+          confidence: routeData.routing.confidence,
+          entities: routeData.entities
+        }])
+        setIsLoading(false)
+      }, 500)
+
+    } catch (error) {
+      console.error('Chat error:', error)
+      setMessages(m => [...m, {
+        role: 'assistant',
+        text: "Sorry, I encountered an error. Please try again.",
+        time: new Date(),
+        error: true
       }])
-    }, 800)
+      setIsLoading(false)
+    }
+  }
+
+  const domainColors = {
+    drilling: '#22c55e',
+    architecture: '#8b5cf6',
+    pipeline: '#3b82f6',
+    personal: '#f59e0b'
   }
 
   return (
@@ -40,18 +114,40 @@ export default function ChatWidget() {
         borderBottom: '1px solid var(--border)',
         display: 'flex',
         alignItems: 'center',
-        gap: '12px'
+        justifyContent: 'space-between'
       }}>
-        <div style={{
-          width: '8px', height: '8px',
-          borderRadius: '50%',
-          background: 'var(--success)',
-          boxShadow: '0 0 8px var(--success)'
-        }} />
-        <div>
-          <div style={{ fontWeight: 500, fontSize: '14px' }}>AI Assistant</div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Connected to Telegram</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '8px', height: '8px',
+            borderRadius: '50%',
+            background: 'var(--success)',
+            boxShadow: '0 0 8px var(--success)'
+          }} />
+          <div>
+            <div style={{ fontWeight: 500, fontSize: '14px' }}>AI Assistant</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              Unified Brain Router
+            </div>
+          </div>
         </div>
+        
+        {/* Domain indicator */}
+        {currentDomain && (
+          <div style={{
+            padding: '4px 10px',
+            borderRadius: '12px',
+            background: domainColors[currentDomain.domain] + '20',
+            border: `1px solid ${domainColors[currentDomain.domain]}40`,
+            fontSize: '11px',
+            color: domainColors[currentDomain.domain],
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span>{currentDomain.domain}</span>
+            <span style={{ opacity: 0.6 }}>{Math.round(currentDomain.confidence * 100)}%</span>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -70,15 +166,59 @@ export default function ChatWidget() {
               background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-secondary)',
               color: msg.role === 'user' ? '#000' : 'var(--text-primary)',
               fontSize: '13px',
-              lineHeight: '1.5'
+              lineHeight: '1.5',
+              borderLeft: msg.domain ? `3px solid ${domainColors[msg.domain]}` : 'none'
             }}>
               {msg.text}
+              {msg.entities && Object.keys(msg.entities).length > 0 && (
+                <div style={{ 
+                  marginTop: '8px', 
+                  paddingTop: '8px', 
+                  borderTop: '1px solid var(--border)',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)'
+                }}>
+                  {Object.entries(msg.entities).map(([k, v]) => (
+                    <span key={k} style={{ marginRight: '8px' }}>
+                      {k}: <strong>{Array.isArray(v) ? v.join(', ') : v}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            <div style={{ 
+              fontSize: '10px', 
+              color: 'var(--text-muted)', 
+              marginTop: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
               {msg.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {msg.domain && (
+                <span style={{ color: domainColors[msg.domain] }}>
+                  • {msg.domain}
+                </span>
+              )}
             </div>
           </div>
         ))}
+        
+        {isLoading && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            padding: '10px 14px',
+            background: 'var(--bg-secondary)',
+            borderRadius: '12px',
+            width: 'fit-content',
+            fontSize: '13px',
+            color: 'var(--text-muted)'
+          }}>
+            <span className="loading-dots">Thinking</span>
+          </div>
+        )}
       </div>
 
       {/* Quick actions */}
@@ -110,17 +250,24 @@ export default function ChatWidget() {
           <input
             value={message}
             onChange={e => setMessage(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder="Message..."
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+            placeholder="Ask about drilling, pipeline, or anything..."
+            disabled={isLoading}
             style={{
               flex: 1,
               padding: '10px 14px',
               fontSize: '13px',
-              borderRadius: '8px'
+              borderRadius: '8px',
+              opacity: isLoading ? 0.6 : 1
             }}
           />
-          <button onClick={sendMessage} className="btn btn-primary" style={{ padding: '10px 16px' }}>
-            ↑
+          <button 
+            onClick={sendMessage} 
+            className="btn btn-primary" 
+            disabled={isLoading}
+            style={{ padding: '10px 16px' }}
+          >
+            {isLoading ? '...' : '↑'}
           </button>
         </div>
       </div>

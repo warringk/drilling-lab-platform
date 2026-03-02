@@ -10,7 +10,7 @@ export default function LandingSelector() {
       justifyContent: 'center',
       gap: '40px'
     }}>
-      <h1 style={{ fontSize: '24px', fontWeight: 300 }}>THE DRILLING LAB</h1>
+      <h1 className="logo-hemi" style={{ fontSize: '24px' }}>drillinglab.ai</h1>
       <p style={{ color: 'var(--text-secondary)', marginTop: '-20px' }}>Choose a landing page concept</p>
       
       <div style={{ display: 'flex', gap: '20px' }}>

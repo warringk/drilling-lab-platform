@@ -43,7 +43,7 @@ export default function ConversationalHub() {
     }}>
       {/* Minimal header */}
       <header style={{ padding: '24px 0', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 400 }}>THE DRILLING LAB</h1>
+        <h1 className="logo-hemi" style={{ fontSize: '20px' }}>drillinglab.ai</h1>
       </header>
 
       {/* Chat area */}

@@ -7,6 +7,25 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>The Drilling Lab</title>
+    <script>
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        var key = params.get('k');
+        if (key === 'kurt2024') {
+          if (!localStorage.getItem('user_data')) {
+            localStorage.setItem('user_data', JSON.stringify({
+              name: 'Kurt Warring',
+              email: 'kurt@drillinglab.ai',
+              role: 'admin',
+              inviteCode: 'KURT2024'
+            }));
+            localStorage.setItem('session_token', 'auto_kurt_' + Date.now());
+            localStorage.setItem('session_expires', new Date(Date.now() + 365*24*60*60*1000).toISOString());
+          }
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

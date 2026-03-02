@@ -32,7 +32,7 @@ export default function CommandCenter() {
         alignItems: 'center'
       }}>
         <div>
-          <h1 style={{ fontSize: '18px', fontWeight: 500 }}>THE DRILLING LAB</h1>
+          <h1 className="logo-hemi" style={{ fontSize: '18px' }}>drillinglab.ai</h1>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Command Center</span>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
