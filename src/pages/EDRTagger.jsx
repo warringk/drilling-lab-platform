@@ -818,7 +818,7 @@ export default function EDRTagger() {
   
   const loadRigs = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/nov/rigs`)
+      const res = await fetch(`${API_BASE}/api/wells/rigs`)
       if (res.ok) {
         const data = await res.json()
         setRigs(data.rigs || [])
@@ -831,7 +831,7 @@ export default function EDRTagger() {
   const loadWells = async (rig) => {
     setLoadingWells(true)
     try {
-      const res = await fetch(`${API_BASE}/api/nov/wells?rig=${encodeURIComponent(rig)}`)
+      const res = await fetch(`${API_BASE}/api/wells?rig=${encodeURIComponent(rig)}`)
       if (res.ok) {
         const data = await res.json()
         setWells(data.wells || [])
@@ -845,7 +845,7 @@ export default function EDRTagger() {
   
   const loadWellDetails = async (wellId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/nov/wells/${wellId}`)
+      const res = await fetch(`${API_BASE}/api/wells/${wellId}`)
       if (res.ok) {
         const data = await res.json()
         setWellDetails(data.well)

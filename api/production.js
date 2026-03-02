@@ -58,6 +58,7 @@ app.use('/api/chat', require('./routes/chat'));
 app.use('/api/project-tracker', require('./routes/projectTracker'));
 app.use('/api/edr-tags', require('./routes/edrTags'));
 app.use('/api/nov', require('./routes/novWells'));
+app.use('/api/wells', require('./routes/wells'));
 app.use('/api/ts/edr', require('./routes/edrTimescale'));
 app.use('/api/schema', require('./routes/schema'));
 app.use('/api/mud-analysis', require('./routes/mud-analysis'));
