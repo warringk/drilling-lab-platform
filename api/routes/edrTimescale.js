@@ -1,71 +1,42 @@
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
-
-// PostgreSQL (TimescaleDB) — single source of truth
-const pool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  database: process.env.PG_DATABASE || 'drilling_lab',
-  user: process.env.PG_USER || 'postgres',
-  password: process.env.PG_PASSWORD || 'postgres',
-  max: 10
-});
-
-// Disable vectorized aggregation (TimescaleDB bug with varchar)
-pool.on('connect', (client) => {
-  client.query('SET timescaledb.enable_vectorized_aggregation = off').catch(() => {});
-});
+const pool = require('../db');
+const wellsService = require('../wellsService');
 
 // ── STATIC ROUTES FIRST (before :licence param) ──────────────────
 
 // GET /api/ts/edr/wells/list — all wells in silver layer
 router.get('/wells/list', async (req, res) => {
   try {
-    const { MongoClient } = require('mongodb');
-    const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017';
-    const mongoClient = new MongoClient(mongoUri);
-    
-    try {
-      await mongoClient.connect();
-      const db = mongoClient.db('drilling_lab');
-      
-      // Get all licences from TimescaleDB
-      const pgResult = await pool.query(`
-        SELECT license, status, records_synced, last_synced_ts
-        FROM silver.sync_state
-        ORDER BY license
-      `);
-      
-      // Get well metadata from MongoDB
-      const licenses = pgResult.rows.map(r => r.license);
-      const wells = await db.collection('nov_wells').find(
-        { licence_number: { $in: licenses } },
-        { projection: { licence_number: 1, well_name: 1, rig_name: 1, job_status: 1, _id: 0 } }
-      ).toArray();
+    // Get sync state from TimescaleDB
+    const pgResult = await pool.query(`
+      SELECT license, status, records_synced, last_synced_ts
+      FROM silver.sync_state
+      ORDER BY license
+    `);
 
-      // Map metadata to sync state
-      const wellMap = new Map(wells.map(w => [w.licence_number, w]));
-      const enriched = pgResult.rows.map(row => {
-        const meta = wellMap.get(row.license) || {};
-        return {
-          licence: row.license,
-          well_name: meta.well_name,
-          rig_name: meta.rig_name,
-          job_status: meta.job_status,
-          status: row.status,
-          records_synced: row.records_synced,
-          last_synced_ts: row.last_synced_ts
-        };
-      });
+    // Batch-fetch well metadata from silver.wells (no MongoDB needed)
+    const licenses = pgResult.rows.map(r => r.license);
+    const wellMap = await wellsService.getByLicenses(licenses);
 
-      res.json({
-        source: 'timescaledb+mongo',
-        count: enriched.length,
-        wells: enriched
-      });
-    } finally {
-      await mongoClient.close();
-    }
+    const enriched = pgResult.rows.map(row => {
+      const meta = wellMap.get(row.license);
+      return {
+        licence: row.license,
+        well_name: meta?.well_name || null,
+        rig_name: meta?.rig || null,
+        job_status: meta?.status || null,
+        status: row.status,
+        records_synced: row.records_synced,
+        last_synced_ts: row.last_synced_ts
+      };
+    });
+
+    res.json({
+      source: 'timescaledb',
+      count: enriched.length,
+      wells: enriched
+    });
   } catch (error) {
     console.error('[edrTimescale] Wells list error:', error.message);
     res.status(500).json({ error: error.message });

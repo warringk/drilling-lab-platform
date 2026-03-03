@@ -5,7 +5,7 @@
  */
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
+const pool = require('../db');
 
 router.get('/stats', async (req, res) => {
   try {
@@ -81,14 +81,8 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// TimescaleDB connection pool
-const pgPool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  database: process.env.PG_DATABASE || 'drilling_lab',
-  user: process.env.PG_USER || 'postgres',
-  password: process.env.PG_PASSWORD || 'postgres',
-  max: 5
-});
+// Use shared pool (imported as 'pool' above)
+const pgPool = pool;
 
 // GET /api/schema/silver-stats - Live TimescaleDB silver layer statistics
 router.get('/silver-stats', async (req, res) => {

@@ -1,62 +1,39 @@
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  database: process.env.PG_DATABASE || 'drilling_lab',
-  user: process.env.PG_USER || 'postgres',
-  password: process.env.PG_PASSWORD || 'postgres',
-  max: 5
-});
-
-pool.on('connect', (client) => {
-  client.query('SET timescaledb.enable_vectorized_aggregation = off').catch(() => {});
-});
+const pool = require('../db');
 
 /**
  * GET /api/rig-state/wells
- * List wells that have micro_state data
+ * List wells that have micro_state data.
+ * Uses silver.wells for metadata + a fast DISTINCT scan for enriched licenses.
  */
 router.get('/wells', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT license,
-             COUNT(*) as total_rows,
-             COUNT(micro_state) as enriched_rows,
-             COUNT(DISTINCT micro_state) as distinct_states,
-             MIN(ts) as min_ts,
-             MAX(ts) as max_ts
-      FROM silver.edr_1s
-      WHERE micro_state IS NOT NULL
-      GROUP BY license
-      ORDER BY total_rows DESC
+      SELECT w.license,
+             w.well_name,
+             w.rig,
+             w.status,
+             w.record_count,
+             w.first_edr_ts as min_ts,
+             w.last_edr_ts as max_ts
+      FROM silver.wells w
+      WHERE w.license IN (
+        SELECT DISTINCT license FROM silver.edr_1s
+        WHERE micro_state IS NOT NULL
+      )
+      ORDER BY w.record_count DESC NULLS LAST
     `);
 
-    // Enrich with MongoDB well metadata
-    const db = req.db;
-    const licences = result.rows.map(r => r.license);
-    // Try both Canadian and American spelling
-    const wells = await db.collection('nov_wells').find(
-      { $or: [{ licence_number: { $in: licences } }, { license_number: { $in: licences } }] },
-      { projection: { licence_number: 1, license_number: 1, well_name: 1, rig_name: 1, job_status: 1, _id: 0 } }
-    ).toArray();
-    const wellMap = new Map(wells.map(w => [w.licence_number || w.license_number, w]));
-
-    const enriched = result.rows.map(row => {
-      const meta = wellMap.get(row.license) || {};
-      return {
-        licence: row.license,
-        wellName: meta.well_name || row.license,
-        rig: meta.rig_name || null,
-        status: meta.job_status || null,
-        totalRows: parseInt(row.total_rows),
-        enrichedRows: parseInt(row.enriched_rows),
-        distinctStates: parseInt(row.distinct_states),
-        minTs: row.min_ts,
-        maxTs: row.max_ts,
-      };
-    });
+    const enriched = result.rows.map(row => ({
+      licence: row.license,
+      wellName: row.well_name || row.license,
+      rig: row.rig || null,
+      status: row.status || null,
+      totalRows: parseInt(row.record_count) || 0,
+      minTs: row.min_ts,
+      maxTs: row.max_ts,
+    }));
 
     res.json({ wells: enriched });
   } catch (error) {
@@ -67,8 +44,9 @@ router.get('/wells', async (req, res) => {
 
 /**
  * GET /api/rig-state/segments/:licence
- * Returns micro_state segments (consecutive same-state rows collapsed)
- * Query params: layer=micro_state|op_mode, start, end, max_segments=5000
+ * Returns micro_state segments (consecutive same-state rows collapsed).
+ * Includes operational_days for x-axis alignment.
+ * Query params: layer=micro_state|op_mode, start, end, max_segments=20000
  */
 router.get('/segments/:licence', async (req, res) => {
   try {
@@ -78,13 +56,11 @@ router.get('/segments/:licence', async (req, res) => {
     const end = req.query.end || null;
     const maxSegments = parseInt(req.query.max_segments) || 20000;
 
-    // Validate layer
     const validLayers = ['micro_state', 'op_mode'];
     if (!validLayers.includes(layer)) {
       return res.status(400).json({ error: `Invalid layer. Use: ${validLayers.join(', ')}` });
     }
 
-    // Build time filter
     let timeFilter = '';
     const params = [licence];
     if (start) {
@@ -96,17 +72,16 @@ router.get('/segments/:licence', async (req, res) => {
       timeFilter += ` AND ts <= $${params.length}`;
     }
 
-    // Use window function to detect state changes and aggregate into segments
     const startTime = Date.now();
     const query = `
       WITH state_changes AS (
-        SELECT ts, ${layer} as state,
+        SELECT ts, operational_days, ${layer} as state,
                LAG(${layer}) OVER (ORDER BY ts) as prev_state
         FROM silver.edr_1s
         WHERE license = $1 AND ${layer} IS NOT NULL${timeFilter}
       ),
       segments AS (
-        SELECT ts, state,
+        SELECT ts, operational_days, state,
                SUM(CASE WHEN state != prev_state OR prev_state IS NULL THEN 1 ELSE 0 END)
                  OVER (ORDER BY ts) as segment_id
         FROM state_changes
@@ -114,6 +89,8 @@ router.get('/segments/:licence', async (req, res) => {
       SELECT state,
              MIN(ts) as start_ts,
              MAX(ts) as end_ts,
+             MIN(operational_days) as start_op_days,
+             MAX(operational_days) as end_op_days,
              COUNT(*) as row_count,
              EXTRACT(EPOCH FROM MAX(ts) - MIN(ts)) as duration_seconds
       FROM segments
@@ -129,11 +106,12 @@ router.get('/segments/:licence', async (req, res) => {
       state: row.state,
       startTs: row.start_ts,
       endTs: row.end_ts,
+      startOpDays: row.start_op_days != null ? parseFloat(row.start_op_days) : null,
+      endOpDays: row.end_op_days != null ? parseFloat(row.end_op_days) : null,
       rowCount: parseInt(row.row_count),
       durationSeconds: parseFloat(row.duration_seconds) || 0,
     }));
 
-    // Compute summary stats
     const stateSummary = {};
     segments.forEach(s => {
       if (!stateSummary[s.state]) stateSummary[s.state] = { count: 0, totalSeconds: 0 };
@@ -158,7 +136,8 @@ router.get('/segments/:licence', async (req, res) => {
 
 /**
  * GET /api/rig-state/traces/:licence
- * Returns downsampled channel traces for overlay on timeline
+ * Returns downsampled channel traces for overlay on timeline.
+ * Always includes operational_days for x-axis.
  * Query params: start, end, channels (comma-sep), resolution (seconds, default 30)
  */
 router.get('/traces/:licence', async (req, res) => {
@@ -167,13 +146,12 @@ router.get('/traces/:licence', async (req, res) => {
     const start = req.query.start;
     const end = req.query.end;
     const resolution = parseInt(req.query.resolution) || 30;
-    const channels = (req.query.channels || 'bit_depth,hook_load,rotary_rpm,standpipe_pressure').split(',');
+    const channels = (req.query.channels || 'bit_depth,hole_depth,hook_load,weight_on_bit,rotary_rpm,rotary_torque,standpipe_pressure,flow_in,flow_out,rate_of_penetration,block_height').split(',');
 
     if (!start || !end) {
       return res.status(400).json({ error: 'start and end query params required' });
     }
 
-    // Build SELECT for requested channels
     const validChannels = [
       'bit_depth', 'hole_depth', 'hook_load', 'weight_on_bit',
       'standpipe_pressure', 'rotary_rpm', 'rotary_torque',
@@ -189,6 +167,7 @@ router.get('/traces/:licence', async (req, res) => {
 
     const query = `
       SELECT time_bucket('${timeBucket}', ts) as ts,
+             AVG(operational_days) as op_days,
              ${avgCols}
       FROM silver.edr_1s
       WHERE license = $1 AND ts >= $2 AND ts <= $3
@@ -200,7 +179,10 @@ router.get('/traces/:licence', async (req, res) => {
     const result = await pool.query(query, [licence, start, end]);
 
     const data = result.rows.map(row => {
-      const point = { ts: row.ts };
+      const point = {
+        ts: row.ts,
+        op_days: row.op_days != null ? parseFloat(row.op_days) : null
+      };
       selectedChannels.forEach(c => {
         point[c] = row[c] != null ? parseFloat(row[c]) : null;
       });

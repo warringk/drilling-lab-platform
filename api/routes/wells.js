@@ -7,34 +7,12 @@
 
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  database: process.env.PG_DATABASE || 'drilling_lab',
-  user: process.env.PG_USER || 'postgres',
-  password: process.env.PG_PASSWORD || 'postgres',
-  max: 5
-});
+const wellsService = require('../wellsService');
 
 // GET /api/wells/rigs — distinct rigs, sorted numerically
 router.get('/rigs', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT DISTINCT rig FROM silver.wells
-      WHERE rig IS NOT NULL AND rig != ''
-      ORDER BY rig
-    `);
-    const rigs = result.rows.map(r => r.rig);
-
-    // Sort numerically where possible (same logic as novWells.js)
-    rigs.sort((a, b) => {
-      const numA = parseInt(a);
-      const numB = parseInt(b);
-      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-      return String(a).localeCompare(String(b));
-    });
-
+    const rigs = await wellsService.getRigs();
     res.json({ rigs });
   } catch (error) {
     console.error('wells/rigs error:', error.message);
@@ -47,41 +25,23 @@ router.get('/rigs', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { rig } = req.query;
-    let result;
-
-    if (rig) {
-      result = await pool.query(`
-        SELECT license, well_name, rig, status, source,
-               first_edr_ts, last_edr_ts, record_count
-        FROM silver.wells
-        WHERE rig = $1
-        ORDER BY spud_date DESC NULLS LAST
-      `, [rig]);
-    } else {
-      result = await pool.query(`
-        SELECT license, well_name, rig, status, source,
-               first_edr_ts, last_edr_ts, record_count
-        FROM silver.wells
-        ORDER BY spud_date DESC NULLS LAST
-        LIMIT 200
-      `);
-    }
+    const wells = await wellsService.getWells(rig ? { rig } : {});
 
     // Map to shape EDR Tagger expects
-    const wells = result.rows.map(r => ({
+    const mapped = wells.map(r => ({
       _id: r.license,
       licence_number: r.license,
       well_name: r.well_name,
       rig_name: r.rig,
-      job_status: r.status || 'Ended',
+      job_status: r.status,
       first_data_date: r.first_edr_ts,
       last_data_date: r.last_edr_ts,
       has_edr: true,
-      record_count: Number(r.record_count) || 0,
+      record_count: r.record_count,
       source: r.source
     }));
 
-    res.json({ wells, count: wells.length });
+    res.json({ wells: mapped, count: mapped.length });
   } catch (error) {
     console.error('wells list error:', error.message);
     res.status(500).json({ error: error.message });
@@ -92,21 +52,12 @@ router.get('/', async (req, res) => {
 router.get('/:license', async (req, res) => {
   try {
     const { license } = req.params;
-    const result = await pool.query(`
-      SELECT license, well_name, uwi, rig, contractor, operator,
-             source, source_id, status,
-             spud_date, rig_release_date, total_depth_m,
-             first_edr_ts, last_edr_ts, record_count,
-             drilling_phases
-      FROM silver.wells
-      WHERE license = $1
-    `, [license]);
+    const r = await wellsService.getByLicense(license);
 
-    if (result.rows.length === 0) {
+    if (!r) {
       return res.status(404).json({ error: 'Well not found' });
     }
 
-    const r = result.rows[0];
     const well = {
       _id: r.license,
       licence_number: r.license,
@@ -117,14 +68,14 @@ router.get('/:license', async (req, res) => {
       operator: r.operator,
       source: r.source,
       source_id: r.source_id,
-      job_status: r.status || 'Ended',
+      job_status: r.status,
       spud_date: r.spud_date,
       end_date: r.rig_release_date,
-      total_depth_m: r.total_depth_m ? Number(r.total_depth_m) : null,
+      total_depth_m: r.total_depth_m,
       first_data_date: r.first_edr_ts,
       last_data_date: r.last_edr_ts,
-      record_count: Number(r.record_count) || 0,
-      drilling_phases: r.drilling_phases || []
+      record_count: r.record_count,
+      drilling_phases: r.drilling_phases
     };
 
     res.json({ well });
