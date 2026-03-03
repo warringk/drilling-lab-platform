@@ -64,6 +64,7 @@ app.use('/api/schema', require('./routes/schema'));
 app.use('/api/mud-analysis', require('./routes/mud-analysis'));
 app.use('/api/charts', require('./routes/charts'));
 app.use('/api/rig-state', require('./routes/rigState'));
+app.use('/api/section-kpis', require('./routes/sectionKpis'));
 
 // Health check
 app.get('/api/health', (req, res) => {

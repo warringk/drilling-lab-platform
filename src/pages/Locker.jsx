@@ -635,11 +635,17 @@ export default function Locker() {
             active={false}
             onClick={() => navigate('/schema-map')}
           />
-          <NavItem 
+          <NavItem
             icon="📊"
             label="Rig State Test"
             active={false}
             onClick={() => navigate('/rig-state-test')}
+          />
+          <NavItem
+            icon="📊"
+            label="Section KPIs"
+            active={false}
+            onClick={() => navigate('/section-kpis')}
           />
           
           <div style={{ margin: '12px 4px', borderTop: '1px solid var(--border)' }} />
@@ -1228,6 +1234,7 @@ function MobileNavItems({ activeTab, setActiveTab, user, dashboards, activeDashb
       <MobileNavItem icon="📡" label="Live Stream" active={false} onClick={() => navigate('/live-stream')} />
       <MobileNavItem icon="📊" label="Charts" active={false} onClick={() => navigate('/charts')} />
       <MobileNavItem icon="🗺️" label="Schema Map" active={false} onClick={() => navigate('/schema-map')} />
+      <MobileNavItem icon="📊" label="Section KPIs" active={false} onClick={() => navigate('/section-kpis')} />
 
       <div style={{ margin: '12px', borderTop: '1px solid var(--border)' }} />
       <MobileNavItem icon="⚙️" label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />

@@ -16,9 +16,10 @@ import WebChat from './pages/WebChat'
 import EDRTagger from './pages/EDRTagger'
 import SchemaMap from './pages/SchemaMap'
 import LiveStream from './pages/LiveStream'
-// import Charts from './pages/Charts' - removed
+import DaysVsDepth from './pages/DaysVsDepth'
 import RigStateTest from './pages/RigStateTest'
 import MudAnalysisSimple from './pages/dashboards/MudAnalysisSimple'
+import SectionKpis from './pages/SectionKpis'
 import sessions from './api/sessions'
 import './styles/global.css'
 
@@ -92,9 +93,19 @@ export default function App() {
                 <RigStateTest />
               </ProtectedRoute>
             } />
+            <Route path="/charts" element={
+              <ProtectedRoute>
+                <DaysVsDepth />
+              </ProtectedRoute>
+            } />
             <Route path="/mud-analysis" element={
               <ProtectedRoute>
                 <MudAnalysisSimple />
+              </ProtectedRoute>
+            } />
+            <Route path="/section-kpis" element={
+              <ProtectedRoute>
+                <SectionKpis />
               </ProtectedRoute>
             } />
             
