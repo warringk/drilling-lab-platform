@@ -22,7 +22,7 @@ async function readPrecomputedKpis(license) {
 
   const result = await pool.query(
     `SELECT section, section_start_ts, section_end_ts, operation_type,
-            hours, op_count, pct, depth_drilled_m, avg_rop_m_per_hr
+            hours, op_count, pct, depth_drilled_m, on_bottom_hrs, avg_rop_m_per_hr
      FROM silver.section_kpis
      WHERE license = $1
      ORDER BY section_start_ts, hours DESC`,
@@ -49,6 +49,7 @@ async function readPrecomputedKpis(license) {
       pct: row.pct
     };
     if (row.depth_drilled_m != null) op.depth_drilled_m = row.depth_drilled_m;
+    if (row.on_bottom_hrs != null) op.on_bottom_hrs = row.on_bottom_hrs;
     if (row.avg_rop_m_per_hr != null) op.avg_rop_m_per_hr = row.avg_rop_m_per_hr;
     sectionMap[row.section].operations.push(op);
   }

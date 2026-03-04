@@ -910,12 +910,34 @@ export default function EDRTagger() {
       )
       if (res.ok) {
         const data = await res.json()
-        setEdrData(data.data || [])
+        const rows = data.data || []
+        setEdrData(rows)
         setQueryTime(data.queryTimeMs)
         // Reset zoom state on new data load
         setViewWindow({ start: null, end: null })
         setZoomHistory([])
         setPrefetchCache({})
+
+        // Auto-trim date range to actual data if there's a large leading/trailing gap
+        // (e.g., rig watch periods at start of a section with no EDR data)
+        if (rows.length > 0) {
+          const firstTs = new Date(rows[0].timestamp).getTime()
+          const lastTs = new Date(rows[rows.length - 1].timestamp).getTime()
+          const reqStart = new Date(startDate).getTime()
+          const reqEnd = new Date(endDate).getTime()
+          const leadingGapHrs = (firstTs - reqStart) / (1000 * 60 * 60)
+          const trailingGapHrs = (reqEnd - lastTs) / (1000 * 60 * 60)
+
+          if (leadingGapHrs > 6 || trailingGapHrs > 6) {
+            const pad = 30 * 60 * 1000 // 30 min padding
+            const trimmedStart = new Date(firstTs - pad).toISOString().slice(0, 16)
+            const trimmedEnd = new Date(lastTs + pad).toISOString().slice(0, 16)
+            if (leadingGapHrs > 6) setStartDate(trimmedStart)
+            if (trailingGapHrs > 6) setEndDate(trimmedEnd)
+            console.log(`Auto-trimmed date range: ${leadingGapHrs.toFixed(0)}h leading gap, ${trailingGapHrs.toFixed(0)}h trailing gap`)
+          }
+        }
+
         console.log(`Loaded ${data.count} points in ${data.queryTimeMs}ms from ${data.table}`)
       } else {
         const err = await res.json()

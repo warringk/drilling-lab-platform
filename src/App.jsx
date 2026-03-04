@@ -20,6 +20,8 @@ import DaysVsDepth from './pages/DaysVsDepth'
 import RigStateTest from './pages/RigStateTest'
 import MudAnalysisSimple from './pages/dashboards/MudAnalysisSimple'
 import SectionKpis from './pages/SectionKpis'
+import ChartPlayground from './pages/ChartPlayground'
+import ConnectionComparison from './pages/ConnectionComparison'
 import sessions from './api/sessions'
 import './styles/global.css'
 
@@ -108,7 +110,17 @@ export default function App() {
                 <SectionKpis />
               </ProtectedRoute>
             } />
-            
+            <Route path="/chart-playground" element={
+              <ProtectedRoute>
+                <ChartPlayground />
+              </ProtectedRoute>
+            } />
+            <Route path="/connections" element={
+              <ProtectedRoute>
+                <ConnectionComparison />
+              </ProtectedRoute>
+            } />
+
             <Route path="/" element={<AuthRedirect />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

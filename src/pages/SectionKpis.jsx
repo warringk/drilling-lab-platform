@@ -338,7 +338,8 @@ export default function SectionKpis() {
             if (!op) return `${type}: 0 hrs`
             let text = `${type}: ${op.hours.toFixed(1)} hrs`
             if (op.depth_drilled_m != null) text += ` | ${Math.round(op.depth_drilled_m)}m drilled`
-            if (op.avg_rop_m_per_hr != null) text += ` | ${op.avg_rop_m_per_hr.toFixed(1)} m/hr`
+            if (op.on_bottom_hrs != null) text += ` | ${op.on_bottom_hrs.toFixed(1)} on-bottom hrs`
+            if (op.avg_rop_m_per_hr != null) text += ` | ROP ${op.avg_rop_m_per_hr.toFixed(1)} m/hr`
             return text
           }).reverse()
         : null
