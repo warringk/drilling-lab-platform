@@ -331,6 +331,18 @@ export default function SectionKpis() {
         return op ? op.hours : 0
       }).reverse()
 
+      // Build custom hover text per well for DRILLING (includes depth + ROP)
+      const customText = type === 'DRILLING'
+        ? sortedWells.map(w => {
+            const op = (w.section?.operations || []).find(o => o.type === 'DRILLING')
+            if (!op) return `${type}: 0 hrs`
+            let text = `${type}: ${op.hours.toFixed(1)} hrs`
+            if (op.depth_drilled_m != null) text += ` | ${Math.round(op.depth_drilled_m)}m drilled`
+            if (op.avg_rop_m_per_hr != null) text += ` | ${op.avg_rop_m_per_hr.toFixed(1)} m/hr`
+            return text
+          }).reverse()
+        : null
+
       return {
         y: yLabels,
         x: hours,
@@ -338,7 +350,10 @@ export default function SectionKpis() {
         type: 'bar',
         orientation: 'h',
         marker: { color: MODE_COLORS[type] || '#64748b' },
-        hovertemplate: `%{y}<br>${type}: %{x:.1f} hrs<extra></extra>`
+        ...(customText
+          ? { text: customText, hovertemplate: '%{y}<br>%{text}<extra></extra>' }
+          : { hovertemplate: `%{y}<br>${type}: %{x:.1f} hrs<extra></extra>` }
+        )
       }
     })
 
@@ -825,6 +840,16 @@ export default function SectionKpis() {
                                       <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: '3px' }}>
                                         ({op.pct.toFixed(0)}%)
                                       </span>
+                                      {type === 'DRILLING' && op.depth_drilled_m != null && (
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: '4px' }}>
+                                          {Math.round(op.depth_drilled_m)}m
+                                        </span>
+                                      )}
+                                      {type === 'DRILLING' && op.avg_rop_m_per_hr != null && (
+                                        <span style={{ color: '#2ecc71', fontSize: '10px', marginLeft: '3px' }}>
+                                          {op.avg_rop_m_per_hr.toFixed(1)} m/hr
+                                        </span>
+                                      )}
                                     </span>
                                   ) : (
                                     <span style={{ color: 'rgba(255,255,255,0.15)' }}>-</span>
@@ -912,7 +937,9 @@ export default function SectionKpis() {
                                         plot_bgcolor: 'rgba(0,0,0,0.2)',
                                         font: { color: '#e0e0e0', size: 10 },
                                         xaxis: {
-                                          range: [w.section?.start_date, w.section?.end_date],
+                                          range: depthData.timestamps.length > 0
+                                            ? [depthData.timestamps[0], depthData.timestamps[depthData.timestamps.length - 1]]
+                                            : [w.section?.start_date, w.section?.end_date],
                                           gridcolor: 'rgba(255,255,255,0.06)',
                                           zeroline: false,
                                           tickformat: '%b %d\n%H:%M'

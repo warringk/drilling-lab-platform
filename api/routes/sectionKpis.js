@@ -13,8 +13,57 @@ const pool = require('../db');
 const wellsService = require('../wellsService');
 
 /**
- * Build section KPIs for a single well.
- * Clips operations to section time boundaries.
+ * Try to read pre-computed KPIs from silver.section_kpis.
+ * Returns formatted result or null if no rows exist.
+ */
+async function readPrecomputedKpis(license) {
+  const well = await wellsService.getByLicense(license);
+  if (!well) return null;
+
+  const result = await pool.query(
+    `SELECT section, section_start_ts, section_end_ts, operation_type,
+            hours, op_count, pct, depth_drilled_m, avg_rop_m_per_hr
+     FROM silver.section_kpis
+     WHERE license = $1
+     ORDER BY section_start_ts, hours DESC`,
+    [license]
+  );
+
+  if (result.rows.length === 0) return null;
+
+  // Group rows by section
+  const sectionMap = {};
+  for (const row of result.rows) {
+    if (!sectionMap[row.section]) {
+      sectionMap[row.section] = {
+        section: row.section,
+        start_date: row.section_start_ts,
+        end_date: row.section_end_ts,
+        operations: []
+      };
+    }
+    const op = {
+      type: row.operation_type,
+      hours: Math.round(row.hours * 10) / 10,
+      count: row.op_count,
+      pct: row.pct
+    };
+    if (row.depth_drilled_m != null) op.depth_drilled_m = row.depth_drilled_m;
+    if (row.avg_rop_m_per_hr != null) op.avg_rop_m_per_hr = row.avg_rop_m_per_hr;
+    sectionMap[row.section].operations.push(op);
+  }
+
+  const sections = Object.values(sectionMap).map(s => ({
+    ...s,
+    total_hours: Math.round(s.operations.reduce((sum, op) => sum + op.hours, 0) * 10) / 10
+  }));
+
+  return { license, well_name: well.well_name, rig: well.rig, sections };
+}
+
+/**
+ * Fallback: Build section KPIs on-the-fly from operation_events + wells.
+ * Used for wells not yet in silver.section_kpis.
  */
 async function buildSectionKpis(license) {
   const well = await wellsService.getByLicense(license);
@@ -25,7 +74,6 @@ async function buildSectionKpis(license) {
     return { license, well_name: well.well_name, rig: well.rig, sections: [] };
   }
 
-  // Fetch all operations for this well
   const opsResult = await pool.query(
     `SELECT operation_id, operation_type, start_ts, end_ts, duration_sec,
             start_depth_m, end_depth_m, min_depth_m, max_depth_m
@@ -39,16 +87,13 @@ async function buildSectionKpis(license) {
   const sections = phases.map(phase => {
     const sectionStart = new Date(phase.start_date).getTime();
     const sectionEnd = new Date(phase.end_date).getTime();
-    const totalHours = (sectionEnd - sectionStart) / 3600000;
 
-    // Find overlapping operations and clip durations
-    const buckets = {}; // operation_type -> { hours, count }
+    const buckets = {};
 
     for (const op of ops) {
       const opStart = new Date(op.start_ts).getTime();
       const opEnd = new Date(op.end_ts).getTime();
 
-      // Check overlap
       if (opStart >= sectionEnd || opEnd <= sectionStart) continue;
 
       const clippedMs = Math.min(opEnd, sectionEnd) - Math.max(opStart, sectionStart);
@@ -60,7 +105,8 @@ async function buildSectionKpis(license) {
       buckets[type].count += 1;
     }
 
-    // Build sorted operations array
+    const totalHours = Object.values(buckets).reduce((sum, b) => sum + b.hours, 0);
+
     const operations = Object.entries(buckets)
       .map(([type, { hours, count }]) => ({
         type,
@@ -82,6 +128,13 @@ async function buildSectionKpis(license) {
   return { license, well_name: well.well_name, rig: well.rig, sections };
 }
 
+/**
+ * Get section KPIs: pre-computed first, fallback to on-the-fly.
+ */
+async function getSectionKpis(license) {
+  return (await readPrecomputedKpis(license)) || (await buildSectionKpis(license));
+}
+
 // ── GET /:license — single well section KPIs ────────────────────────
 router.get('/compare', async (req, res) => {
   // Must be declared before /:license to avoid route shadowing
@@ -96,7 +149,7 @@ router.get('/compare', async (req, res) => {
       return res.status(400).json({ error: 'No valid licenses provided' });
     }
 
-    const results = await Promise.all(licenseList.map(l => buildSectionKpis(l)));
+    const results = await Promise.all(licenseList.map(l => getSectionKpis(l)));
 
     const wells = results
       .filter(r => r !== null)
@@ -144,7 +197,7 @@ router.get('/:license/segments', async (req, res) => {
 
 router.get('/:license', async (req, res) => {
   try {
-    const result = await buildSectionKpis(req.params.license);
+    const result = await getSectionKpis(req.params.license);
     if (!result) {
       return res.status(404).json({ error: 'Well not found' });
     }
